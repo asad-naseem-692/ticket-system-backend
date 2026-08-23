@@ -1,15 +1,36 @@
+import uuid
 import pytest
 from fastapi.testclient import TestClient
 from app.main import app
-from app.core.security import create_access_token, decode_access_token, verify_password, get_password_hash
+from app.core.database import SessionLocal
+from app.models.user import User
+from app.core.security import (
+    create_access_token,
+    decode_access_token,
+    verify_password,
+    get_password_hash,
+)
 
 client = TestClient(app)
 
-def test_signup_successful():
-    email = f"testuser_{pytest.helpers_uuid()}@example.com" if hasattr(pytest, "helpers_uuid") else "test_signup_1@example.com"
-    # Ensure fresh email
-    import uuid
-    email = f"user_{uuid.uuid4().hex[:8]}@example.com"
+@pytest.fixture
+def created_emails():
+    """Tracks test emails created during tests and guarantees database cleanup."""
+    emails = []
+    yield emails
+    # Cleanup created test users from the database
+    if emails:
+        db = SessionLocal()
+        try:
+            db.query(User).filter(User.email.in_(emails)).delete(synchronize_session=False)
+            db.commit()
+        finally:
+            db.close()
+
+def test_signup_successful(created_emails):
+    email = f"test_signup_{uuid.uuid4().hex[:8]}@example.com"
+    created_emails.append(email)
+
     response = client.post(
         "/auth/signup",
         json={
@@ -28,9 +49,10 @@ def test_signup_successful():
     assert "hashed_password" not in data
     assert "password" not in data
 
-def test_signup_duplicate_email_rejected():
-    import uuid
-    email = f"dup_{uuid.uuid4().hex[:8]}@example.com"
+def test_signup_duplicate_email_rejected(created_emails):
+    email = f"test_dup_{uuid.uuid4().hex[:8]}@example.com"
+    created_emails.append(email)
+
     res1 = client.post(
         "/auth/signup",
         json={
