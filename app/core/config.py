@@ -1,12 +1,13 @@
 import os
 from typing import List
-from pydantic_settings import BaseSettings
-from pydantic import field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from dotenv import load_dotenv
 
 load_dotenv()
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
     DATABASE_URL: str = os.getenv(
         "DATABASE_URL", "postgresql://postgres:password@localhost:5432/customer_support"
     )
@@ -34,9 +35,5 @@ class Settings(BaseSettings):
         if not self.CORS_ORIGINS:
             return ["http://localhost:3000"]
         return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
-
-    class Config:
-        env_file = ".env"
-        extra = "ignore"
 
 settings = Settings()

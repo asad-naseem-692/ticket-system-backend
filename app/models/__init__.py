@@ -1,4 +1,5 @@
-# Models package
 from app.core.database import Base
+from app.models.user import User
+from app.models.ticket import Ticket
 
-__all__ = ["Base"]
+__all__ = ["Base", "User", "Ticket"]
