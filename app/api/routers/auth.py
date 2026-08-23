@@ -1,3 +1,4 @@
+import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -6,11 +7,22 @@ from app.core.security import (
     get_password_hash,
     verify_password,
     create_access_token,
+    create_password_reset_token,
+    verify_password_reset_token,
     get_current_user,
 )
 from app.models.user import User
 from app.schemas.user import UserCreate, UserResponse
-from app.schemas.auth import LoginRequest, AuthResponse
+from app.schemas.auth import (
+    LoginRequest,
+    AuthResponse,
+    RequestResetRequest,
+    RequestResetResponse,
+    ConfirmResetRequest,
+    ConfirmResetResponse,
+)
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -83,6 +95,52 @@ def logout():
     Client-side session termination endpoint. Returns confirmation message.
     """
     return {"detail": "Successfully logged out"}
+
+@router.post(
+    "/request-reset",
+    response_model=RequestResetResponse,
+    summary="Request a password reset token",
+)
+def request_password_reset(req: RequestResetRequest, db: Session = Depends(get_db)):
+    """
+    Generates a short-lived single-use password reset token for the specified user.
+    Always returns a generic confirmation message to prevent email enumeration.
+    """
+    norm_email = req.email.lower().strip()
+    user = db.query(User).filter(User.email == norm_email).first()
+
+    reset_token = None
+    if user:
+        reset_token = create_password_reset_token(email=user.email, expires_minutes=15)
+        logger.info(f"Password reset token requested for {user.email}: {reset_token}")
+
+    return {
+        "detail": "Password reset instructions have been generated if an account exists for this email.",
+        "reset_token": reset_token,
+    }
+
+@router.post(
+    "/confirm-reset",
+    response_model=ConfirmResetResponse,
+    summary="Confirm password reset with valid token",
+)
+def confirm_password_reset(req: ConfirmResetRequest, db: Session = Depends(get_db)):
+    """
+    Verifies reset token, hashes the new password, and updates user credentials.
+    """
+    email = verify_password_reset_token(req.token)
+
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User account not found",
+        )
+
+    user.hashed_password = get_password_hash(req.new_password)
+    db.commit()
+
+    return {"detail": "Password has been reset successfully"}
 
 @router.get(
     "/me",

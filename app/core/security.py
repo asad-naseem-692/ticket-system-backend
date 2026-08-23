@@ -59,6 +59,40 @@ def decode_access_token(token: str) -> Dict[str, Any]:
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+def create_password_reset_token(email: str, expires_minutes: int = 15) -> str:
+    """
+    Creates a short-lived signed JWT for single-use password reset.
+    """
+    expire = datetime.now(timezone.utc) + timedelta(minutes=expires_minutes)
+    to_encode: Dict[str, Any] = {
+        "sub": str(email).lower().strip(),
+        "type": "password_reset",
+        "exp": expire,
+    }
+    encoded_jwt = jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+    return encoded_jwt
+
+def verify_password_reset_token(token: str) -> str:
+    """
+    Decodes and validates a password reset token.
+    Returns the target email on success, or raises HTTPException(400).
+    """
+    try:
+        payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
+        token_type = payload.get("type")
+        email = payload.get("sub")
+        if token_type != "password_reset" or not email:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid password reset token",
+            )
+        return email
+    except JWTError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired password reset token",
+        )
+
 def get_current_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_scheme),
     db: Session = Depends(get_db),
