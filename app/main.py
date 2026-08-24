@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 
-from app.api.routers import auth, tickets, users, comments, attachments, notifications
+from app.api.routers import auth, tickets, users, comments, attachments, notifications, reports
 from app.workers.sla_monitor_worker import start_sla_worker, stop_sla_worker
 
 @asynccontextmanager
@@ -38,6 +38,7 @@ app.include_router(users.router)
 app.include_router(comments.router)
 app.include_router(attachments.router)
 app.include_router(notifications.router)
+app.include_router(reports.router)
 
 @app.get("/health", tags=["Health"])
 def health_check():

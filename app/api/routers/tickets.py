@@ -9,6 +9,7 @@ from app.models.user import User
 from app.models.ticket import Ticket
 from app.models.comment import Comment
 from app.models.attachment import Attachment
+from app.models.audit_log import AuditLog
 from app.schemas.ticket import (
     TicketCreate,
     TicketResponse,
@@ -17,8 +18,10 @@ from app.schemas.ticket import (
     TicketPriorityUpdate,
     TicketAssignRequest,
 )
+from app.schemas.audit_log import AuditLogResponse
 from app.services.priority_service import calculate_priority
 from app.services.sla_service import calculate_deadline
+from app.services.audit_service import log_audit_event
 
 router = APIRouter(prefix="/tickets", tags=["Tickets"])
 
@@ -46,6 +49,7 @@ def create_ticket(
     - Automatically scores priority based on category/keywords (FEAT-14)
     - Computes SLA deadline from central fixed SLA table (FEAT-16, FEAT-17)
     - Sets initial status = 'open' and sla_breached = False
+    - Writes creation audit log entry (FEAT-33)
     """
     now = datetime.now(timezone.utc)
 
@@ -76,6 +80,15 @@ def create_ticket(
     db.add(new_ticket)
     db.commit()
     db.refresh(new_ticket)
+
+    # Audit Log
+    log_audit_event(
+        db,
+        ticket_id=new_ticket.id,
+        actor_id=current_user.id,
+        action="created",
+        details=f"Ticket created with priority '{new_ticket.priority}' and category '{new_ticket.category}'",
+    )
 
     return new_ticket
 
@@ -202,6 +215,46 @@ def get_ticket_detail(
         attachments=ticket.attachments,
     )
 
+@router.get(
+    "/{ticket_id}/audit-log",
+    response_model=List[AuditLogResponse],
+    summary="Get chronological tamper-evident audit history for a ticket",
+)
+def get_ticket_audit_log(
+    ticket_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Returns ordered audit trail history for accountability (FEAT-33).
+    """
+    ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
+    if not ticket:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Ticket not found",
+        )
+
+    if current_user.role == "customer" and ticket.customer_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to view audit history for this ticket.",
+        )
+    elif current_user.role == "agent" and ticket.assigned_agent_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access restricted: this ticket is not assigned to your queue.",
+        )
+
+    logs = (
+        db.query(AuditLog)
+        .options(joinedload(AuditLog.actor))
+        .filter(AuditLog.ticket_id == ticket_id)
+        .order_by(AuditLog.timestamp.asc())
+        .all()
+    )
+    return logs
+
 @router.patch(
     "/{ticket_id}/status",
     response_model=TicketResponse,
@@ -218,6 +271,7 @@ def update_ticket_status(
     - Enforces forward-only transitions: open -> in_progress -> resolved -> closed
     - Enforces permission checks: only the assigned agent or an admin can update status
     - Checks SLA breach state upon resolution
+    - Records audit log entry (FEAT-33)
     """
     ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
     if not ticket:
@@ -262,6 +316,16 @@ def update_ticket_status(
     db.commit()
     db.refresh(ticket)
 
+    # Audit Log
+    action_name = "closed" if target_status == "closed" else "status_change"
+    log_audit_event(
+        db,
+        ticket_id=ticket.id,
+        actor_id=current_user.id,
+        action=action_name,
+        details=f"Status changed from '{current_status}' to '{target_status}'",
+    )
+
     return ticket
 
 @router.patch(
@@ -280,6 +344,7 @@ def override_ticket_priority(
     - Admin only (403 for non-admins)
     - Recalculates deadline_at according to fixed SLA duration table
     - Recalculates sla_breached state
+    - Records audit log entry (FEAT-33)
     """
     if current_user.role != "admin":
         raise HTTPException(
@@ -294,6 +359,7 @@ def override_ticket_priority(
             detail="Ticket not found",
         )
 
+    old_priority = ticket.priority
     new_priority = priority_in.priority
     ticket.priority = new_priority
 
@@ -311,6 +377,15 @@ def override_ticket_priority(
 
     db.commit()
     db.refresh(ticket)
+
+    # Audit Log
+    log_audit_event(
+        db,
+        ticket_id=ticket.id,
+        actor_id=current_user.id,
+        action="priority_override",
+        details=f"Priority overridden from '{old_priority}' to '{new_priority}'. Recalculated deadline.",
+    )
 
     return ticket
 
@@ -334,6 +409,7 @@ def assign_ticket(
     Assigns or reassigns a support ticket to an agent (FEAT-18, FEAT-19, FEAT-22):
     - Admin only (403 for non-admins)
     - Validates target agent exists and has role 'agent'
+    - Records audit log entry (FEAT-33)
     """
     if current_user.role != "admin":
         raise HTTPException(
@@ -355,9 +431,27 @@ def assign_ticket(
             detail="Target assigned user must exist and have the 'agent' role.",
         )
 
+    is_reassign = ticket.assigned_agent_id is not None
+    old_agent_id = ticket.assigned_agent_id
     ticket.assigned_agent_id = target_agent.id
+
     db.commit()
     db.refresh(ticket)
+
+    # Audit Log
+    action_name = "reassigned" if is_reassign else "assigned"
+    detail_msg = (
+        f"Reassigned to {target_agent.name} ({target_agent.email}) [Previous Agent ID: {old_agent_id}]"
+        if is_reassign
+        else f"Assigned to {target_agent.name} ({target_agent.email})"
+    )
+    log_audit_event(
+        db,
+        ticket_id=ticket.id,
+        actor_id=current_user.id,
+        action=action_name,
+        details=detail_msg,
+    )
 
     return ticket
 

@@ -21,6 +21,8 @@ from app.schemas.ticket import (
 from app.schemas.comment import CommentCreate, CommentResponse, CommentVisibility
 from app.schemas.attachment import AttachmentResponse
 from app.schemas.notification import NotificationResponse, NotificationMarkReadRequest
+from app.schemas.audit_log import AuditLogResponse
+from app.schemas.report import TicketSummaryReport, AgentPerformanceItem, SLABreachItem
 
 __all__ = [
     "UserBase",
@@ -47,4 +49,8 @@ __all__ = [
     "AttachmentResponse",
     "NotificationResponse",
     "NotificationMarkReadRequest",
+    "AuditLogResponse",
+    "TicketSummaryReport",
+    "AgentPerformanceItem",
+    "SLABreachItem",
 ]
