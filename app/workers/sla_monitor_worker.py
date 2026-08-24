@@ -13,6 +13,12 @@ async def sla_monitor_worker_loop(interval_seconds: int = 60):
     Background worker loop periodically checking for approaching deadlines and breaches (FEAT-27).
     """
     logger.info("Starting Background SLA Monitor Worker...")
+    # Allow FastAPI startup to complete before initial database scan
+    try:
+        await asyncio.wait_for(_stop_event.wait(), timeout=2.0)
+    except asyncio.TimeoutError:
+        pass
+
     while not _stop_event.is_set():
         db = SessionLocal()
         try:
