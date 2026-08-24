@@ -8,6 +8,7 @@ from app.schemas.auth import (
     ConfirmResetRequest,
     ConfirmResetResponse,
 )
+from app.schemas.ticket import TicketCreate, TicketResponse, TicketStatus, TicketPriority
 
 __all__ = [
     "UserBase",
@@ -20,4 +21,8 @@ __all__ = [
     "RequestResetResponse",
     "ConfirmResetRequest",
     "ConfirmResetResponse",
+    "TicketCreate",
+    "TicketResponse",
+    "TicketStatus",
+    "TicketPriority",
 ]
