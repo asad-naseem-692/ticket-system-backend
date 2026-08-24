@@ -1,17 +1,29 @@
 from datetime import datetime, timezone
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.user import User
 from app.models.ticket import Ticket
-from app.schemas.ticket import TicketCreate, TicketResponse
+from app.schemas.ticket import (
+    TicketCreate,
+    TicketResponse,
+    TicketDetailResponse,
+    TicketStatusUpdate,
+)
 from app.services.priority_service import calculate_priority
 from app.services.sla_service import calculate_deadline
 
 router = APIRouter(prefix="/tickets", tags=["Tickets"])
+
+ALLOWED_TRANSITIONS = {
+    "open": ["in_progress"],
+    "in_progress": ["resolved"],
+    "resolved": ["closed"],
+    "closed": [],
+}
 
 @router.post(
     "",
@@ -99,7 +111,7 @@ def get_assigned_tickets(
     current_user: User = Depends(get_current_user),
 ):
     """
-    Returns only tickets assigned to the logged-in agent/admin (FEAT-10).
+    Returns only tickets assigned to the logged-in agent/admin (FEAT-10, FEAT-21).
     """
     if current_user.role not in ["agent", "admin"]:
         raise HTTPException(
@@ -114,6 +126,112 @@ def get_assigned_tickets(
         .all()
     )
     return tickets
+
+@router.get(
+    "/{ticket_id}",
+    response_model=TicketDetailResponse,
+    summary="Get detailed information for a single ticket",
+)
+def get_ticket_detail(
+    ticket_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Returns full details for a single ticket (FEAT-13).
+    Strictly enforces role-based access restrictions (FEAT-21):
+    - Customers can only view their own tickets (403 otherwise).
+    - Agents can only view tickets assigned to them (403 otherwise).
+    - Admins can view any ticket.
+    """
+    ticket = (
+        db.query(Ticket)
+        .options(joinedload(Ticket.customer), joinedload(Ticket.assigned_agent))
+        .filter(Ticket.id == ticket_id)
+        .first()
+    )
+
+    if not ticket:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Ticket not found",
+        )
+
+    # RBAC Data Restriction Check
+    if current_user.role == "customer" and ticket.customer_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to view this ticket.",
+        )
+    elif current_user.role == "agent" and ticket.assigned_agent_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access restricted: this ticket is not assigned to your queue.",
+        )
+
+    return ticket
+
+@router.patch(
+    "/{ticket_id}/status",
+    response_model=TicketResponse,
+    summary="Update ticket status lifecycle",
+)
+def update_ticket_status(
+    ticket_id: str,
+    status_in: TicketStatusUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Updates the lifecycle status of a ticket (FEAT-12):
+    - Enforces forward-only transitions: open -> in_progress -> resolved -> closed
+    - Enforces permission checks: only the assigned agent or an admin can update status
+    - Checks SLA breach state upon resolution
+    """
+    ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
+    if not ticket:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Ticket not found",
+        )
+
+    # 1. RBAC Permission Check
+    is_assigned_agent = current_user.role == "agent" and ticket.assigned_agent_id == current_user.id
+    is_admin = current_user.role == "admin"
+
+    if not (is_assigned_agent or is_admin):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the assigned agent or an administrator can update the status of this ticket.",
+        )
+
+    # 2. Strict forward-only transition check
+    current_status = ticket.status
+    target_status = status_in.status
+
+    allowed = ALLOWED_TRANSITIONS.get(current_status, [])
+    if target_status not in allowed:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid status transition from '{current_status}' to '{target_status}'. Allowed next statuses: {allowed}",
+        )
+
+    # 3. Apply update
+    now = datetime.now(timezone.utc)
+    ticket.status = target_status
+
+    # Check SLA breach if resolving
+    if target_status in ["resolved", "closed"]:
+        ticket_deadline = ticket.deadline_at
+        if ticket_deadline.tzinfo is None:
+            ticket_deadline = ticket_deadline.replace(tzinfo=timezone.utc)
+        if now > ticket_deadline:
+            ticket.sla_breached = True
+
+    db.commit()
+    db.refresh(ticket)
+
+    return ticket
 
 @router.get(
     "",
