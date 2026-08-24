@@ -23,6 +23,8 @@ class Ticket(Base):
     # Relationships
     customer = relationship("User", back_populates="customer_tickets", foreign_keys=[customer_id])
     assigned_agent = relationship("User", back_populates="assigned_tickets", foreign_keys=[assigned_agent_id])
+    comments = relationship("Comment", back_populates="ticket", cascade="all, delete-orphan", order_by="Comment.created_at.asc()")
+    attachments = relationship("Attachment", back_populates="ticket", cascade="all, delete-orphan", order_by="Attachment.created_at.asc()")
 
     def to_dict(self):
         return {

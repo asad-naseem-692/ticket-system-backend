@@ -18,6 +18,8 @@ from app.schemas.ticket import (
     TicketStatus,
     TicketPriority,
 )
+from app.schemas.comment import CommentCreate, CommentResponse, CommentVisibility
+from app.schemas.attachment import AttachmentResponse
 
 __all__ = [
     "UserBase",
@@ -38,4 +40,8 @@ __all__ = [
     "TicketAssignRequest",
     "TicketStatus",
     "TicketPriority",
+    "CommentCreate",
+    "CommentResponse",
+    "CommentVisibility",
+    "AttachmentResponse",
 ]

@@ -1,7 +1,9 @@
 from datetime import datetime
-from typing import Optional, Literal
+from typing import Optional, List, Literal
 from pydantic import BaseModel, ConfigDict, Field
 from app.schemas.user import UserResponse
+from app.schemas.comment import CommentResponse
+from app.schemas.attachment import AttachmentResponse
 
 TicketStatus = Literal["open", "in_progress", "resolved", "closed"]
 TicketPriority = Literal["critical", "high", "medium", "low"]
@@ -38,3 +40,5 @@ class TicketResponse(BaseModel):
 class TicketDetailResponse(TicketResponse):
     customer: Optional[UserResponse] = None
     assigned_agent: Optional[UserResponse] = None
+    comments: List[CommentResponse] = []
+    attachments: List[AttachmentResponse] = []

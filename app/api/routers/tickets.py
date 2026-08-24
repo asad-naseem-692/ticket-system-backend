@@ -7,6 +7,8 @@ from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.user import User
 from app.models.ticket import Ticket
+from app.models.comment import Comment
+from app.models.attachment import Attachment
 from app.schemas.ticket import (
     TicketCreate,
     TicketResponse,
@@ -145,10 +147,16 @@ def get_ticket_detail(
     - Customers can only view their own tickets (403 otherwise).
     - Agents can only view tickets assigned to them (403 otherwise).
     - Admins can view any ticket.
+    - Filters comments: customers NEVER see internal comments (FEAT-23).
     """
     ticket = (
         db.query(Ticket)
-        .options(joinedload(Ticket.customer), joinedload(Ticket.assigned_agent))
+        .options(
+            joinedload(Ticket.customer),
+            joinedload(Ticket.assigned_agent),
+            joinedload(Ticket.attachments).joinedload(Attachment.uploader),
+            joinedload(Ticket.comments).joinedload(Comment.author),
+        )
         .filter(Ticket.id == ticket_id)
         .first()
     )
@@ -171,7 +179,28 @@ def get_ticket_detail(
             detail="Access restricted: this ticket is not assigned to your queue.",
         )
 
-    return ticket
+    # Filter out internal comments for customer callers
+    comments_list = ticket.comments
+    if current_user.role == "customer":
+        comments_list = [c for c in ticket.comments if c.visibility == "public"]
+
+    return TicketDetailResponse(
+        id=ticket.id,
+        title=ticket.title,
+        description=ticket.description,
+        category=ticket.category,
+        status=ticket.status,
+        priority=ticket.priority,
+        customer_id=ticket.customer_id,
+        assigned_agent_id=ticket.assigned_agent_id,
+        created_at=ticket.created_at,
+        deadline_at=ticket.deadline_at,
+        sla_breached=ticket.sla_breached,
+        customer=ticket.customer,
+        assigned_agent=ticket.assigned_agent,
+        comments=comments_list,
+        attachments=ticket.attachments,
+    )
 
 @router.patch(
     "/{ticket_id}/status",
