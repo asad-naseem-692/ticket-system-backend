@@ -13,6 +13,8 @@ from app.schemas.ticket import (
     TicketResponse,
     TicketDetailResponse,
     TicketStatusUpdate,
+    TicketPriorityUpdate,
+    TicketAssignRequest,
     TicketStatus,
     TicketPriority,
 )
@@ -32,6 +34,8 @@ __all__ = [
     "TicketResponse",
     "TicketDetailResponse",
     "TicketStatusUpdate",
+    "TicketPriorityUpdate",
+    "TicketAssignRequest",
     "TicketStatus",
     "TicketPriority",
 ]

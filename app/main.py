@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 
-from app.api.routers import auth, tickets
+from app.api.routers import auth, tickets, users
 
 app = FastAPI(
     title="Customer Support Ticket & SLA Automation API",
@@ -23,6 +23,7 @@ app.add_middleware(
 # Include API Routers
 app.include_router(auth.router)
 app.include_router(tickets.router)
+app.include_router(users.router)
 
 @app.get("/health", tags=["Health"])
 def health_check():

@@ -12,6 +12,8 @@ from app.schemas.ticket import (
     TicketResponse,
     TicketDetailResponse,
     TicketStatusUpdate,
+    TicketPriorityUpdate,
+    TicketAssignRequest,
 )
 from app.services.priority_service import calculate_priority
 from app.services.sla_service import calculate_deadline
@@ -228,6 +230,103 @@ def update_ticket_status(
         if now > ticket_deadline:
             ticket.sla_breached = True
 
+    db.commit()
+    db.refresh(ticket)
+
+    return ticket
+
+@router.patch(
+    "/{ticket_id}/priority",
+    response_model=TicketResponse,
+    summary="Manual priority override (admin only)",
+)
+def override_ticket_priority(
+    ticket_id: str,
+    priority_in: TicketPriorityUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Manually overrides ticket priority (FEAT-15, FEAT-22):
+    - Admin only (403 for non-admins)
+    - Recalculates deadline_at according to fixed SLA duration table
+    - Recalculates sla_breached state
+    """
+    if current_user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators can override ticket priority.",
+        )
+
+    ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
+    if not ticket:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Ticket not found",
+        )
+
+    new_priority = priority_in.priority
+    ticket.priority = new_priority
+
+    # Recalculate deadline based on original created_at timestamp
+    ticket.deadline_at = calculate_deadline(priority=new_priority, created_at=ticket.created_at)
+
+    # Check if deadline passed
+    now = datetime.now(timezone.utc)
+    ticket_deadline = ticket.deadline_at
+    if ticket_deadline.tzinfo is None:
+        ticket_deadline = ticket_deadline.replace(tzinfo=timezone.utc)
+
+    if ticket.status not in ["resolved", "closed"]:
+        ticket.sla_breached = now > ticket_deadline
+
+    db.commit()
+    db.refresh(ticket)
+
+    return ticket
+
+@router.post(
+    "/{ticket_id}/assign",
+    response_model=TicketResponse,
+    summary="Assign ticket to an agent (admin only)",
+)
+@router.patch(
+    "/{ticket_id}/reassign",
+    response_model=TicketResponse,
+    summary="Reassign ticket to another agent (admin only)",
+)
+def assign_ticket(
+    ticket_id: str,
+    assign_in: TicketAssignRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Assigns or reassigns a support ticket to an agent (FEAT-18, FEAT-19, FEAT-22):
+    - Admin only (403 for non-admins)
+    - Validates target agent exists and has role 'agent'
+    """
+    if current_user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators can assign or reassign tickets.",
+        )
+
+    ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
+    if not ticket:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Ticket not found",
+        )
+
+    target_agent = db.query(User).filter(User.id == assign_in.agent_id, User.role == "agent").first()
+    if not target_agent:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Target assigned user must exist and have the 'agent' role.",
+        )
+
+    ticket.assigned_agent_id = target_agent.id
     db.commit()
     db.refresh(ticket)
 

@@ -14,6 +14,12 @@ class TicketCreate(BaseModel):
 class TicketStatusUpdate(BaseModel):
     status: TicketStatus
 
+class TicketPriorityUpdate(BaseModel):
+    priority: TicketPriority
+
+class TicketAssignRequest(BaseModel):
+    agent_id: str
+
 class TicketResponse(BaseModel):
     id: str
     title: str
