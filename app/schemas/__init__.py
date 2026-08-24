@@ -20,6 +20,7 @@ from app.schemas.ticket import (
 )
 from app.schemas.comment import CommentCreate, CommentResponse, CommentVisibility
 from app.schemas.attachment import AttachmentResponse
+from app.schemas.notification import NotificationResponse, NotificationMarkReadRequest
 
 __all__ = [
     "UserBase",
@@ -44,4 +45,6 @@ __all__ = [
     "CommentResponse",
     "CommentVisibility",
     "AttachmentResponse",
+    "NotificationResponse",
+    "NotificationMarkReadRequest",
 ]
